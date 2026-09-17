@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Local data, generated artifacts, and environment files
+.DS_Store
 /data/raw/
 /data/processed/
 /artifacts/

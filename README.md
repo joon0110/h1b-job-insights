@@ -9,6 +9,8 @@ activity cannot tell an applicant whether a company will sponsor them.
 
 The project will keep three kinds of results distinct: records observed in the DOL
 data, metrics calculated from those records, and forecasts produced by a model.
+The [DOL source review](docs/data-sources.md) records the selected releases and
+observed schema differences.
 
 ## Development setup
 
@@ -27,7 +29,5 @@ python -m pip install -e '.[dev]'
 ruff check .
 ```
 
-The repository currently contains the package scaffold. Data ingestion, tests,
-database tables, models, API, and app will be added in their own milestones.
 Raw DOL files belong under `data/raw/`; generated data belongs under
 `data/processed/`. Both locations are ignored by Git.
