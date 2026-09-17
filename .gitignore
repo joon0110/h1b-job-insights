@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local data, generated artifacts, and environment files
+/data/raw/
+/data/processed/
+/artifacts/
+.env.*
+!.env.example
