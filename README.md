@@ -12,7 +12,13 @@ data, metrics calculated from those records, and forecasts produced by a model.
 
 ## Development setup
 
-Use Python 3.11 or newer. On a machine with Python 3.13:
+Use Python 3.11 or newer. [pyproject.toml](pyproject.toml) tells pip to build the
+package with setuptools and find its code under `src/`. To install only the
+package, run `python -m pip install .`. For development, use the editable install
+below: `-e` picks up local code changes without reinstalling, and `[dev]` adds
+pytest and Ruff.
+
+On a machine with Python 3.13:
 
 ```sh
 python3.13 -m venv .venv
