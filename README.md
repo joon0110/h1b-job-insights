@@ -7,12 +7,12 @@ visa approval, a hire, or future sponsorship.
 ## Development setup
 
 Use Python 3.11 or newer. [pyproject.toml](pyproject.toml) defines the package
-and its optional dependencies. Install the data tools and development tools with:
+and its optional dependencies. Install the data, analysis, and development tools with:
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[data,dev]'
+python -m pip install -e '.[data,analysis,dev]'
 ```
 
 For the package alone, run `python -m pip install .`.
@@ -82,3 +82,23 @@ quarters after a company's first record appear as zero. Each change compares
 with the previous quarter; percentages are blank when the previous value was
 zero. After adding a file, rerun the Excel pipeline and company counts. Data
 files are ignored by Git.
+
+## Analyze company history
+
+After preparing the data, run:
+
+```sh
+python -m h1b_job_insights.eda
+```
+
+This reads the Parquet files and checks company history, quarterly activity,
+case revisions, and date coverage. It writes `summary.json`, `quarters.csv`,
+`source_coverage.csv`, and `overview.png` to `artifacts/eda/`. The summary includes
+the source checksums. The chart shows quarterly company counts and requested
+positions, activity in a company's first four quarters, repeat activity from
+the previous quarter, and cases per company-quarter. Generated results are
+ignored by Git.
+
+The [analysis notes](docs/analysis.md) describe the findings and the prediction
+target: whether a company has at least one H-1B LCA record in the next fiscal
+quarter. This command analyzes the data; it does not train a model.
