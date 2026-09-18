@@ -34,4 +34,5 @@ processing.
 available version of each case. `DECISION_DATE` determines its fiscal quarter,
 where Q1 is October–December. `CASE_STATUS` determines whether a case is
 `Certified`; the total LCA count includes every status. `TOTAL_WORKER_POSITIONS`
-counts requested workers, so it is not used as an application count.
+is summed separately as requested positions. It does not identify individual
+workers or confirm hires.

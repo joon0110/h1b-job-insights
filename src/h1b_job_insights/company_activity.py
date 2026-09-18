@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import tempfile
 from datetime import date
@@ -12,7 +13,14 @@ import pyarrow.parquet as pq
 from h1b_job_insights import normalize
 
 BATCH_SIZE = 20_000
-INPUT_COLUMNS = ("CASE_NUMBER", "CASE_STATUS", "VISA_CLASS", "DECISION_DATE", "EMPLOYER_NAME")
+INPUT_COLUMNS = (
+    "CASE_NUMBER",
+    "CASE_STATUS",
+    "VISA_CLASS",
+    "DECISION_DATE",
+    "EMPLOYER_NAME",
+    "TOTAL_WORKER_POSITIONS",
+)
 OUTPUT_SCHEMA = pa.schema(
     [
         ("EMPLOYER_ID", pa.string()),
@@ -22,6 +30,9 @@ OUTPUT_SCHEMA = pa.schema(
         ("CERTIFIED_CASES", pa.int64()),
         ("CHANGE_FROM_PREVIOUS_QUARTER", pa.int64()),
         ("CHANGE_PERCENT", pa.float64()),
+        ("REQUESTED_POSITIONS", pa.int64()),
+        ("POSITION_CHANGE_FROM_PREVIOUS_QUARTER", pa.int64()),
+        ("POSITION_CHANGE_PERCENT", pa.float64()),
     ]
 )
 
@@ -55,25 +66,36 @@ def load_cases(db: sqlite3.Connection, path: Path) -> tuple[int, int]:
     missing_case_numbers = 0
     for batch in pq.ParquetFile(path).iter_batches(columns=INPUT_COLUMNS, batch_size=BATCH_SIZE):
         pending = []
-        for case_number, status, visa, decision_date, raw_name in zip(
+        for case_number, status, visa, decision_date, raw_name, raw_positions in zip(
             *(batch.column(i).to_pylist() for i in range(len(INPUT_COLUMNS)))
         ):
             rows += 1
             if not case_number or not case_number.strip():
                 missing_case_numbers += 1
                 continue
+            visa_class = visa.strip().upper() if visa else None
+            positions = None
+            if visa_class == "H-1B":
+                value = raw_positions.strip() if raw_positions else ""
+                if not re.fullmatch(r"[1-9][0-9]*", value):
+                    raise ValueError(
+                        f"Invalid TOTAL_WORKER_POSITIONS in {path}, "
+                        f"case {case_number}: {raw_positions!r}"
+                    )
+                positions = int(value)
             name = normalize.employer_name(raw_name)
             pending.append(
                 (
                     case_number.strip().upper(),
-                    visa.strip().upper() if visa else None,
+                    visa_class,
                     name,
                     normalize.employer_id(name) if name else None,
                     status.strip() if status else None,
                     quarter_index(decision_date),
+                    positions,
                 )
             )
-        db.executemany("INSERT OR REPLACE INTO cases VALUES (?, ?, ?, ?, ?, ?)", pending)
+        db.executemany("INSERT OR REPLACE INTO cases VALUES (?, ?, ?, ?, ?, ?, ?)", pending)
     return rows, missing_case_numbers
 
 
@@ -82,14 +104,22 @@ def write_quarters(db: sqlite3.Connection, path: Path) -> tuple[int, int, str | 
         "SELECT MIN(quarter), MAX(quarter) FROM cases "
         "WHERE visa_class = 'H-1B' AND employer_id IS NOT NULL AND quarter IS NOT NULL"
     ).fetchone()
-    first_quarter, last_quarter = bounds
+    _, last_quarter = bounds
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".parquet.part")
     row_count = company_count = 0
     buffer = {field.name: [] for field in OUTPUT_SCHEMA}
 
     def add_row(
-        name_id: str, name: str, quarter: int, count: int, certified: int, previous: int
+        name_id: str,
+        name: str,
+        quarter: int,
+        count: int,
+        certified: int,
+        positions: int,
+        previous_count: int,
+        previous_positions: int,
+        first_company_quarter: int,
     ) -> None:
         nonlocal row_count
         values = (
@@ -98,10 +128,15 @@ def write_quarters(db: sqlite3.Connection, path: Path) -> tuple[int, int, str | 
             quarter_label(quarter),
             count,
             certified,
-            None if quarter == first_quarter else count - previous,
+            None if quarter == first_company_quarter else count - previous_count,
             None
-            if quarter == first_quarter or previous == 0
-            else round(100 * (count - previous) / previous, 2),
+            if quarter == first_company_quarter or previous_count == 0
+            else round(100 * (count - previous_count) / previous_count, 2),
+            positions,
+            None if quarter == first_company_quarter else positions - previous_positions,
+            None
+            if quarter == first_company_quarter or previous_positions == 0
+            else round(100 * (positions - previous_positions) / previous_positions, 2),
         )
         for field, value in zip(OUTPUT_SCHEMA, values):
             buffer[field.name].append(value)
@@ -117,11 +152,22 @@ def write_quarters(db: sqlite3.Connection, path: Path) -> tuple[int, int, str | 
                 if current_id is None:
                     return
                 company_count += 1
-                previous = 0
-                for quarter in range(min(counts), last_quarter + 1):
-                    count, certified = counts.get(quarter, (0, 0))
-                    add_row(current_id, current_name, quarter, count, certified, previous)
-                    previous = count
+                previous_count = previous_positions = 0
+                first_company_quarter = min(counts)
+                for quarter in range(first_company_quarter, last_quarter + 1):
+                    count, certified, positions = counts.get(quarter, (0, 0, 0))
+                    add_row(
+                        current_id,
+                        current_name,
+                        quarter,
+                        count,
+                        certified,
+                        positions,
+                        previous_count,
+                        previous_positions,
+                        first_company_quarter,
+                    )
+                    previous_count, previous_positions = count, positions
                     if len(buffer["EMPLOYER_ID"]) >= BATCH_SIZE:
                         writer.write_table(pa.Table.from_pydict(buffer, schema=OUTPUT_SCHEMA))
                         for values in buffer.values():
@@ -129,16 +175,17 @@ def write_quarters(db: sqlite3.Connection, path: Path) -> tuple[int, int, str | 
 
             query = (
                 "SELECT employer_id, employer_name, quarter, COUNT(*), "
-                "SUM(CASE WHEN status = 'Certified' THEN 1 ELSE 0 END) "
+                "SUM(CASE WHEN status = 'Certified' THEN 1 ELSE 0 END), "
+                "SUM(positions) "
                 "FROM cases WHERE visa_class = 'H-1B' AND employer_id IS NOT NULL "
                 "AND quarter IS NOT NULL GROUP BY employer_id, employer_name, quarter "
                 "ORDER BY employer_id, quarter"
             )
-            for name_id, name, quarter, count, certified in db.execute(query):
+            for name_id, name, quarter, count, certified, positions in db.execute(query):
                 if name_id != current_id:
                     flush_company()
                     current_id, current_name, counts = name_id, name, {}
-                counts[quarter] = (count, certified)
+                counts[quarter] = (count, certified, positions)
             flush_company()
             if buffer["EMPLOYER_ID"]:
                 writer.write_table(pa.Table.from_pydict(buffer, schema=OUTPUT_SCHEMA))
@@ -166,7 +213,6 @@ def run(processed_dir: Path, output_dir: Path | None = None) -> dict:
     if output_manifest.is_file() and result_path.is_file() and quality_path.is_file():
         saved = json.loads(output_manifest.read_text())
         if saved.get("fingerprint") == version:
-            print("Source files and rules unchanged; using existing company counts")
             return json.loads(quality_path.read_text())
 
     with tempfile.TemporaryDirectory(prefix="company-cases-", dir=output_dir) as temp:
@@ -175,7 +221,8 @@ def run(processed_dir: Path, output_dir: Path | None = None) -> dict:
         db.execute("PRAGMA synchronous=OFF")
         db.execute(
             "CREATE TABLE cases (case_number TEXT PRIMARY KEY, visa_class TEXT, "
-            "employer_name TEXT, employer_id TEXT, status TEXT, quarter INTEGER)"
+            "employer_name TEXT, employer_id TEXT, status TEXT, quarter INTEGER, "
+            "positions INTEGER)"
         )
         source_rows = missing_case_numbers = 0
         for item in files:
@@ -192,6 +239,10 @@ def run(processed_dir: Path, output_dir: Path | None = None) -> dict:
             "SELECT COUNT(*) FROM cases WHERE visa_class = 'H-1B' "
             "AND employer_id IS NOT NULL AND quarter IS NOT NULL"
         ).fetchone()[0]
+        requested_positions = db.execute(
+            "SELECT SUM(positions) FROM cases WHERE visa_class = 'H-1B' "
+            "AND employer_id IS NOT NULL AND quarter IS NOT NULL"
+        ).fetchone()[0]
         db.execute("CREATE INDEX cases_by_company ON cases (employer_id, quarter)")
         output_rows, companies, latest_quarter = write_quarters(db, result_path)
         db.close()
@@ -203,6 +254,7 @@ def run(processed_dir: Path, output_dir: Path | None = None) -> dict:
         "missing_case_numbers": missing_case_numbers,
         "h1b_cases": h1b_cases,
         "h1b_cases_with_company_and_date": counted_cases,
+        "requested_positions": requested_positions,
         "companies": companies,
         "company_quarter_rows": output_rows,
         "latest_quarter": latest_quarter,
@@ -220,15 +272,21 @@ def show_company(path: Path, company: str) -> None:
     if table.num_rows == 0:
         print(f"No H-1B LCA records found for {name}")
         return
-    print(f"{name}\nQuarter      LCA cases  Certified  Change  Change %")
+    print(name)
+    print("Quarter       LCAs  Certified  LCA +/-    LCA %  Req. positions  Pos +/-    Pos %")
     for row in table.to_pylist():
         change = row["CHANGE_FROM_PREVIOUS_QUARTER"]
         percent = row["CHANGE_PERCENT"]
+        position_change = row["POSITION_CHANGE_FROM_PREVIOUS_QUARTER"]
+        position_percent = row["POSITION_CHANGE_PERCENT"]
         print(
-            f"{row['FISCAL_QUARTER']:<12} {row['LCA_CASES']:>9}  "
+            f"{row['FISCAL_QUARTER']:<12} {row['LCA_CASES']:>5}  "
             f"{row['CERTIFIED_CASES']:>9}  "
-            f"{change if change is not None else '-':>6}  "
-            f"{f'{percent:+.2f}%' if percent is not None else '-':>8}"
+            f"{change if change is not None else '-':>7}  "
+            f"{f'{percent:+.2f}%' if percent is not None else '-':>7}  "
+            f"{row['REQUESTED_POSITIONS']:>14}  "
+            f"{position_change if position_change is not None else '-':>7}  "
+            f"{f'{position_percent:+.2f}%' if position_percent is not None else '-':>7}"
         )
 
 

@@ -66,15 +66,19 @@ python -m h1b_job_insights.company_activity --company "Amazon.com Services LLC"
 ```
 
 The first command writes `data/processed/company_activity/company_quarters.parquet`.
-The second prints one company's quarterly counts and changes. Names are grouped
-after normalizing capitalization, spaces, and punctuation in endings such as
-`LLC`. FEIN, job title, and worksite do not affect the grouping. Different names
-are kept separate.
+The second prints one company's quarterly counts, requested positions, and
+changes. Names are grouped after normalizing capitalization, spaces, and
+punctuation in endings such as `LLC`. FEIN, job title, and worksite do not affect
+the grouping. Different names are kept separate.
 
 Each case number is counted once using its latest available release. `LCA_CASES`
-includes all statuses; `CERTIFIED_CASES` counts only `Certified`. Quarters follow
-the U.S. federal fiscal year: Q1 is October–December. Missing quarters after a
-company's first record appear as zero. Change percentage is blank when the
-previous quarter had zero cases. These figures describe LCA decisions, not visa
-approvals or hires. After adding a file, rerun the Excel pipeline and company
-counts. Data files are ignored by Git.
+includes all statuses; `CERTIFIED_CASES` counts only `Certified`.
+`REQUESTED_POSITIONS` sums `TOTAL_WORKER_POSITIONS` across those cases. It is the
+number of positions requested on LCAs, not a count of distinct people, visas,
+or hires. Missing or invalid position values stop the run with the case number.
+
+Quarters follow the U.S. federal fiscal year: Q1 is October–December. Missing
+quarters after a company's first record appear as zero. Each change compares
+with the previous quarter; percentages are blank when the previous value was
+zero. After adding a file, rerun the Excel pipeline and company counts. Data
+files are ignored by Git.
