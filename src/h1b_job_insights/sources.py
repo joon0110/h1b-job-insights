@@ -139,7 +139,11 @@ WORKSITE_FILENAME = re.compile(r"LCA_Worksites_(FY_?20\d{2}_Q[1-4])\.xlsx", re.I
 
 def discover_sources(raw_dir: Path) -> tuple[Source, ...]:
     known = {source.filename: source for source in SOURCES}
-    selected = [source for source in SOURCES if (raw_dir / source.filename).is_file()]
+    selected = [
+        source
+        for source in SOURCES
+        if source.kind == "main" and (raw_dir / source.filename).is_file()
+    ]
     extras = []
     for path in sorted(raw_dir.iterdir()):
         if not path.is_file() or path.suffix.lower() != ".xlsx" or path.name.startswith("~$"):
@@ -151,13 +155,12 @@ def discover_sources(raw_dir: Path) -> tuple[Source, ...]:
         if main:
             extras.append(Source(main.group(1).upper(), "main", None, path.name))
         elif worksites:
-            release = worksites.group(1).upper().replace("FY_", "FY")
-            extras.append(Source(release, "worksites", None, path.name))
+            continue
         else:
             raise ValueError(f"Unrecognized Excel filename in {raw_dir}: {path.name}")
     sources = tuple([*selected, *extras])
     if not sources:
-        raise FileNotFoundError(f"No DOL Excel workbooks found in {raw_dir}")
+        raise FileNotFoundError(f"No DOL LCA disclosure workbooks found in {raw_dir}")
     keys = [(source.release, source.kind) for source in sources]
     if len(keys) != len(set(keys)):
         raise ValueError(f"More than one workbook for the same release and kind in {raw_dir}")
