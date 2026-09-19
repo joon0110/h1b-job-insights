@@ -61,12 +61,17 @@ def fingerprint(files: list[dict]) -> str:
     return digest.hexdigest()
 
 
-def load_cases(db: sqlite3.Connection, path: Path) -> tuple[int, int]:
+def load_cases(
+    db: sqlite3.Connection, path: Path, date_column: str = "DECISION_DATE"
+) -> tuple[int, int]:
+    if date_column not in {"DECISION_DATE", "RECEIVED_DATE"}:
+        raise ValueError(f"Unsupported case date: {date_column}")
+    columns = tuple(date_column if name == "DECISION_DATE" else name for name in INPUT_COLUMNS)
     rows = 0
     missing_case_numbers = 0
-    for batch in pq.ParquetFile(path).iter_batches(columns=INPUT_COLUMNS, batch_size=BATCH_SIZE):
+    for batch in pq.ParquetFile(path).iter_batches(columns=columns, batch_size=BATCH_SIZE):
         pending = []
-        for case_number, status, visa, decision_date, raw_name, raw_positions in zip(
+        for case_number, status, visa, case_date, raw_name, raw_positions in zip(
             *(batch.column(i).to_pylist() for i in range(len(INPUT_COLUMNS)))
         ):
             rows += 1
@@ -91,7 +96,7 @@ def load_cases(db: sqlite3.Connection, path: Path) -> tuple[int, int]:
                     name,
                     normalize.employer_id(name) if name else None,
                     status.strip() if status else None,
-                    quarter_index(decision_date),
+                    quarter_index(case_date),
                     positions,
                 )
             )

@@ -1,8 +1,8 @@
 # H-1B Job Insights
 
 This repo processes U.S. Department of Labor LCA disclosure files to show
-historical H-1B activity by employer. An LCA is an application, not proof of a
-visa approval, a hire, or future sponsorship.
+historical H-1B activity by employer and analyze quarterly filing patterns.
+An LCA is an application, not proof of a visa approval, a hire, or future sponsorship.
 
 ## Development setup
 
@@ -72,7 +72,8 @@ punctuation in endings such as `LLC`. FEIN, job title, and worksite do not affec
 the grouping. Different names are kept separate.
 
 Each case number is counted once using its latest available release. `LCA_CASES`
-includes all statuses; `CERTIFIED_CASES` counts only `Certified`.
+includes all statuses; `CERTIFIED_CASES` counts only `Certified`. These counts
+use `DECISION_DATE`.
 `REQUESTED_POSITIONS` sums `TOTAL_WORKER_POSITIONS` across those cases. It is the
 number of positions requested on LCAs, not a count of distinct people, visas,
 or hires. Missing or invalid position values stop the run with the case number.
@@ -94,11 +95,24 @@ python -m h1b_job_insights.eda
 This reads the Parquet files and checks company history, quarterly activity,
 case revisions, and date coverage. It writes `summary.json`, `quarters.csv`,
 `source_coverage.csv`, and `overview.png` to `artifacts/eda/`. The summary includes
-the source checksums. The chart shows quarterly company counts and requested
-positions, activity in a company's first four quarters, repeat activity from
-the previous quarter, and cases per company-quarter. Generated results are
-ignored by Git.
+the source checksums. The four charts show:
 
-The [analysis notes](docs/analysis.md) describe the findings and the prediction
-target: whether a company has at least one H-1B LCA record in the next fiscal
-quarter. This command analyzes the data; it does not train a model.
+- Companies with a filing in each quarter.
+- How many of a company's first four observed quarters had a filing.
+- Next-quarter filing rates, split by whether the company filed in the previous quarter.
+- Counts of next-quarter outcomes: no record or at least one record.
+
+The analysis uses `RECEIVED_DATE` and keeps the latest version of each case.
+The receipt-based company table is saved in `data/processed/activity/`.
+With the current sources, the charts cover FY2022 Q1–FY2026 Q2. The latest source
+quarter is omitted to reduce incomplete recent counts; this does not guarantee
+that the remaining quarters are complete.
+
+The bottom two charts include only companies with at least four quarters of
+prior history and an observed next quarter. A company can contribute multiple
+quarter pairs. These are historical outcomes, not predicted probabilities.
+Requested positions remain in `quarters.csv` and `summary.json`.
+Generated results are ignored by Git.
+
+The [analysis notes](docs/analysis.md) describe quarterly activity, sparse company
+histories, and source revisions.
