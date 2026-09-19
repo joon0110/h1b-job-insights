@@ -10,8 +10,11 @@ U.S. Department of Labor disclosure files.
   and NumPy for data preparation.
 - SQL with SQLite to deduplicate cases and count company activity by quarter.
   The database is temporary; processed data is saved as Parquet.
-- scikit-learn and XGBoost for models, joblib for saving them, and Matplotlib
-  for charts. pytest and Ruff are used for checks.
+- Random Forest from scikit-learn and XGBoost are trained on the same data for
+  comparison. scikit-learn also calibrates probabilities. XGBoost is the default
+  for lookups.
+- joblib saves the models, Matplotlib makes charts, and pytest and Ruff check
+  the code.
 
 ## Fiscal quarters
 
