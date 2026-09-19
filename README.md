@@ -1,28 +1,57 @@
 # H-1B Job Insights
 
-This repo processes U.S. Department of Labor LCA disclosure files to show
-historical H-1B activity by employer and analyze quarterly filing patterns.
-An LCA is an application, not proof of a visa approval, a hire, or future sponsorship.
+Look up a company's quarterly H-1B Labor Condition Application (LCA) counts and
+estimate the probability of at least one record next quarter. Data comes from
+U.S. Department of Labor disclosure files.
 
-## Development setup
+## Setup
 
-Use Python 3.11 or newer. [pyproject.toml](pyproject.toml) defines the package
-and its optional dependencies. Install the data, analysis, and development tools with:
+Use Python 3.11 or newer. Install the dependencies listed in
+[pyproject.toml](pyproject.toml):
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[data,analysis,dev]'
+python -m pip install -e '.[data,analysis,ml,dev]'
 ```
 
-For the package alone, run `python -m pip install .`.
+On macOS, install OpenMP for XGBoost: `brew install libomp`.
+Run the commands below from the repository root.
+
+## Look up a company
+
+After preparing the data and training the models, run:
+
+```sh
+python -m h1b_job_insights.activity_predict --company "Amazon.com Services LLC"
+```
+
+XGBoost is the default. To use Random Forest:
+
+```sh
+python -m h1b_job_insights.activity_predict \
+  --company "Amazon.com Services LLC" --model random_forest
+```
+
+Each command prints the company's quarterly counts, followed by:
+
+```text
+History through FY2026_Q2; target FY2026_Q3
+Probability of at least one H-1B LCA record: 99.1%
+```
+
+The example uses XGBoost. Its model is in `artifacts/activity/trend_constraints/`;
+Random Forest's is in `artifacts/activity/`. Each directory contains
+`classifiers.joblib`. `--model-dir` overrides this location.
+
+Companies need at least four quarters of history. The prediction is for the
+quarter after the data cutoff, which may differ from the current quarter.
 
 ## Prepare the data
 
-Download the main LCA Excel files you need and put them in `data/raw/` with the
-filenames below. Create the folder if needed: `mkdir -p data/raw`. Download all
-listed files for the available 2022–2026 history. Worksite files are not needed
-for company counts. See [DOL source notes](docs/data-sources.md) for format details.
+Download the main Excel files below into `data/raw/`, keeping these filenames.
+Create the folder with `mkdir -p data/raw`. Worksite files are not needed.
+See [source notes](docs/data-sources.md) for column mappings and case counting.
 
 | Release | Main files |
 | --- | --- |
@@ -32,33 +61,59 @@ for company counts. See [DOL source notes](docs/data-sources.md) for format deta
 | FY2025 | [Q1](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q1.xlsx) `LCA_Disclosure_Data_FY2025_Q1.xlsx`<br>[Q2](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q2.xlsx) `LCA_Disclosure_Data_FY2025_Q2.xlsx`<br>[Q3](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q3.xlsx) `LCA_Disclosure_Data_FY2025_Q3.xlsx`<br>[Q4](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q4.xlsx) `LCA_Disclosure_Data_FY2025_Q4.xlsx` |
 | FY2026 Q3 | [Download](https://www.dol.gov/media/LCA_Disclosure_Data_FY2026_Q3.xlsx) `LCA_Disclosure_Data_FY2026_Q3.xlsx` |
 
-From the repository root, run:
+Convert the Excel files to Parquet:
 
 ```sh
 python -m h1b_job_insights.pipeline
 ```
 
-The command finds the main workbooks in `data/raw/`, validates their headers, and
-writes Parquet files to `data/processed/main/`.
-`data/processed/source_manifest.json` records file checksums, headers, and row
-counts. `data/processed/quality.json` contains the validation results. The raw
-and processed data folders are ignored by Git.
+Outputs go to `data/processed/main/`. `source_manifest.json` records source
+files, checksums, headers, and row counts; `quality.json` contains data checks.
+Data and generated models are excluded from Git.
 
-New quarterly files are picked up when named like
-`LCA_Disclosure_Data_FY2027_Q1.xlsx`. The pipeline maps their headers into a
-fixed set of columns; missing optional columns become null. Unknown columns or
-missing required columns stop processing with the filename and column names.
-Add confirmed header changes to `src/h1b_job_insights/schema.py` before rerunning.
+The pipeline finds files named like `LCA_Disclosure_Data_FY2027_Q1.xlsx` and
+maps their headers to the same columns. Missing optional columns become null.
+Unknown or missing required columns stop the run with the filename and column
+names. Add confirmed header changes to `src/h1b_job_insights/schema.py`.
 
-The first conversion reads every workbook and can take a while. With unchanged
-files, a second run reuses the output. When you add a file, the pipeline converts
-that file and rechecks the combined data from existing Parquet files. Use
-`--force` to rebuild everything. The Parquet files keep all source rows,
-including repeated cases.
+Unchanged files are reused. Adding a file converts that file and refreshes the
+combined data checks. `--force` converts everything again. All source rows,
+including repeated cases, remain in the Parquet files.
 
-## Company counts
+## Train the models
 
-After the Excel pipeline finishes, run:
+Run this when setting up the project or rebuilding models, not for each lookup:
+
+```sh
+python -m h1b_job_insights.activity_features
+python -m h1b_job_insights.activity_train --jobs 4
+python -m h1b_job_insights.activity_train --constrain-trends \
+  --reuse-random-forest artifacts/activity \
+  --output-dir artifacts/activity/trend_constraints --jobs 4
+```
+
+The first command builds inputs in `data/processed/activity/`. The second trains
+both classifiers. The third trains XGBoost with trend constraints and reuses the
+saved Random Forest. Reuse requires the same data and time splits.
+
+Features use company history, recent changes, prior activity in the same fiscal
+quarter, and market totals. Names are lookup keys, not model inputs.
+
+Model settings are selected using FY2024 outcomes. Probability calibration is
+fitted on FY2025 Q1–Q2 predictions and kept only if it improves the score on
+FY2025 Q3–Q4. Final training uses outcomes through FY2026 Q2. New forecast
+periods require updating these splits and retraining. The current saved models
+use probabilities without calibration.
+
+For XGBoost, lower recent or annual growth, fewer active quarters, and longer
+inactivity cannot raise the probability when other inputs stay fixed. Flat
+responses are allowed. Seasonal and market changes can still raise a company's
+next-quarter probability. Calibration is applied only if it preserves these
+directions and improves the validation score.
+
+## Historical counts and charts
+
+To see counts, requested positions, and quarterly changes by decision date:
 
 ```sh
 python -m h1b_job_insights.company_activity
@@ -66,53 +121,65 @@ python -m h1b_job_insights.company_activity --company "Amazon.com Services LLC"
 ```
 
 The first command writes `data/processed/company_activity/company_quarters.parquet`.
-The second prints one company's quarterly counts, requested positions, and
-changes. Names are grouped after normalizing capitalization, spaces, and
-punctuation in endings such as `LLC`. FEIN, job title, and worksite do not affect
-the grouping. Different names are kept separate.
+The second reads it. `LCA_CASES` includes all statuses; `CERTIFIED_CASES` includes
+only `Certified`. `REQUESTED_POSITIONS` sums `TOTAL_WORKER_POSITIONS`.
 
-Each case number is counted once using its latest available release. `LCA_CASES`
-includes all statuses; `CERTIFIED_CASES` counts only `Certified`. These counts
-use `DECISION_DATE`.
-`REQUESTED_POSITIONS` sums `TOTAL_WORKER_POSITIONS` across those cases. It is the
-number of positions requested on LCAs, not a count of distinct people, visas,
-or hires. Missing or invalid position values stop the run with the case number.
-
-Quarters follow the U.S. federal fiscal year: Q1 is October–December. Missing
-quarters after a company's first record appear as zero. Each change compares
-with the previous quarter; percentages are blank when the previous value was
-zero. After adding a file, rerun the Excel pipeline and company counts. Data
-files are ignored by Git.
-
-## Analyze company history
-
-After preparing the data, run:
+To generate the four historical charts by receipt date:
 
 ```sh
 python -m h1b_job_insights.eda
 ```
 
-This reads the Parquet files and checks company history, quarterly activity,
-case revisions, and date coverage. It writes `summary.json`, `quarters.csv`,
-`source_coverage.csv`, and `overview.png` to `artifacts/eda/`. The summary includes
-the source checksums. The four charts show:
+`artifacts/eda/overview.png` shows quarterly active companies, activity in each
+company's first four quarters, filing rates after active or inactive quarters,
+and next-quarter record/no-record counts. The last two charts require four
+quarters of prior history and an observed next quarter.
 
-- Companies with a filing in each quarter.
-- How many of a company's first four observed quarters had a filing.
-- Next-quarter filing rates, split by whether the company filed in the previous quarter.
-- Counts of next-quarter outcomes: no record or at least one record.
+Chart counts and requested positions are in `quarters.csv` and `summary.json`.
+`source_coverage.csv` shows receipt quarters by source release.
+See [analysis notes](docs/analysis.md) for the results and chart definitions.
 
-The analysis uses `RECEIVED_DATE` and keeps the latest version of each case.
-The receipt-based company table is saved in `data/processed/activity/`.
-With the current sources, the charts cover FY2022 Q1–FY2026 Q2. The latest source
-quarter is omitted to reduce incomplete recent counts; this does not guarantee
-that the remaining quarters are complete.
+## Data definitions
 
-The bottom two charts include only companies with at least four quarters of
-prior history and an observed next quarter. A company can contribute multiple
-quarter pairs. These are historical outcomes, not predicted probabilities.
-Requested positions remain in `quarters.csv` and `summary.json`.
-Generated results are ignored by Git.
+- Companies are grouped by normalized name, ignoring FEIN, job title, and
+  worksite. Different names stay separate, including renamed companies.
+- Each case is counted once using its newest available version. Quarters after
+  a company's first record receive zero when no cases appear.
+- Fiscal Q1 is October–December. Predictions and charts use `RECEIVED_DATE`;
+  the separate company-count command uses `DECISION_DATE`.
+- Requested positions are not distinct workers or confirmed hires. Filing
+  probabilities do not describe an individual's sponsorship or visa approval chance.
+- The files contain revisions to past records. They do not reconstruct what was
+  available at each historical forecast date. The latest source quarter is
+  omitted as a buffer; earlier quarters may still be incomplete.
 
-The [analysis notes](docs/analysis.md) describe quarterly activity, sparse company
-histories, and source revisions.
+## Tests
+
+Tests for data conversion, company counts, charts, and models are in `tests/`.
+With the setup dependencies installed, run:
+
+```sh
+python -m pytest tests
+```
+
+To compare predictions with actual FY2026 Q1–Q2 records:
+
+```sh
+python -m tests.check_models --jobs 4
+```
+
+This fits temporary classifiers using the saved settings and outcomes through
+FY2025 Q4. Both target quarters use that same cutoff. It writes predictions,
+error metrics, and filing rates by probability band to `artifacts/checks/models/`.
+The saved models used for company lookups are unchanged. The records include
+later revisions, and this period has already been used in earlier experiments.
+
+To check the saved XGBoost's trend constraints:
+
+```sh
+python -m tests.check_constraints
+```
+
+This changes one input at a time on up to 512 sampled rows and checks whether
+the probability follows the specified direction. It does not measure accuracy.
+The Excel pipeline and EDA commands also retain their source-data checks.

@@ -31,7 +31,7 @@ Company names are normalized; FEIN does not affect grouping.
 
 1. **Companies filing each quarter.** Each company counts once in a quarter,
    whether it filed one LCA or hundreds. FY2022 Q1 has 17,226 companies.
-   Requested positions remain in the CSV and summary, but are no longer plotted.
+   Requested positions are in the CSV and summary.
 2. **Activity in the first four observed quarters.** Of 122,220 companies with
    four quarters available, 84,173 filed in just one of those quarters. The four
    quarters start at each company's first observed filing, so their dates differ
@@ -55,8 +55,7 @@ These counts cover the full analysis period, before any train/test split.
 ## Checks and limits
 
 Quarterly case and requested-position totals match an independent aggregation
-from the source Parquet files. Tests also check the two outcome groups, exclusion
-of unknown future quarters, date selection, and source revisions.
+from the source Parquet files.
 
 Across all visa classes, 169,886 rows repeat an earlier case number. Of these,
 71,885 change status and decision date; none change receipt date. The source
