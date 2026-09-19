@@ -6,18 +6,16 @@ U.S. Department of Labor disclosure files.
 
 ## Fiscal quarters
 
-DOL files use the U.S. government fiscal year (FY), which runs from October
-through September. FY2026 covers October 2025–September 2026.
+DOL files use the U.S. government fiscal year (FY). It begins in October and
+ends the following September. The FY number is the calendar year in which it
+ends, so Q1 falls in the previous calendar year.
 
-| Quarter | Months | FY2026 dates |
-| --- | --- | --- |
-| Q1 | October–December | October–December 2025 |
-| Q2 | January–March | January–March 2026 |
-| Q3 | April–June | April–June 2026 |
-| Q4 | July–September | July–September 2026 |
-
-With data through FY2026 Q3 (June 2026), the next forecast is FY2026 Q4
-(July–September 2026).
+| FY quarter | Months |
+| --- | --- |
+| Q1 | October–December |
+| Q2 | January–March |
+| Q3 | April–June |
+| Q4 | July–September |
 
 ## 1. Install
 
