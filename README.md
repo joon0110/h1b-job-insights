@@ -4,6 +4,15 @@ Look up a company's quarterly H-1B Labor Condition Application (LCA) counts and
 estimate the probability of at least one record next quarter. Data comes from
 U.S. Department of Labor disclosure files.
 
+## Tools
+
+- Python 3.11+ with openpyxl for Excel files, PyArrow for Parquet, and pandas
+  and NumPy for data preparation.
+- SQL with SQLite to deduplicate cases and count company activity by quarter.
+  The database is temporary; processed data is saved as Parquet.
+- scikit-learn and XGBoost for models, joblib for saving them, and Matplotlib
+  for charts. pytest and Ruff are used for checks.
+
 ## Fiscal quarters
 
 DOL files use the U.S. government fiscal year (FY). It begins in October and
@@ -60,6 +69,9 @@ mkdir -p data/raw
 | FY2024 | [Q1](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2024_Q1.xlsx) `LCA_Disclosure_Data_FY2024_Q1.xlsx`<br>[Q2](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2024_Q2.xlsx) `LCA_Disclosure_Data_FY2024_Q2.xlsx`<br>[Q3](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2024_Q3.xlsx) `LCA_Disclosure_Data_FY2024_Q3.xlsx`<br>[Q4](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2024_Q4.xlsx) `LCA_Disclosure_Data_FY2024_Q4.xlsx` |
 | FY2025 | [Q1](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q1.xlsx) `LCA_Disclosure_Data_FY2025_Q1.xlsx`<br>[Q2](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q2.xlsx) `LCA_Disclosure_Data_FY2025_Q2.xlsx`<br>[Q3](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q3.xlsx) `LCA_Disclosure_Data_FY2025_Q3.xlsx`<br>[Q4](https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q4.xlsx) `LCA_Disclosure_Data_FY2025_Q4.xlsx` |
 | FY2026 Q3 | [Download](https://www.dol.gov/media/LCA_Disclosure_Data_FY2026_Q3.xlsx) `LCA_Disclosure_Data_FY2026_Q3.xlsx` |
+
+The FY2026 Q3 file includes records from Q1–Q3, so this project does not need
+separate FY2026 Q1 or Q2 files.
 
 ## 3. Convert and train
 
@@ -158,5 +170,8 @@ excluded from Git and are not needed for company lookups.
 - The probability describes at least one LCA record under that company name. It
   does not measure an individual's sponsorship or visa approval chance. Requested
   positions are not distinct workers or confirmed hires.
+- FY2026 Q3 receipt counts are provisional. The Q3 file covers cases decided
+  through June 30, 2026, so Q3 applications decided later are not in it. This
+  is a source timing limit, not a code error.
 - Later releases can revise past records. Historical checks use these revised
   records, not snapshots of what was available at each earlier forecast date.
