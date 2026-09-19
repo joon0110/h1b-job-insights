@@ -9,13 +9,21 @@ U.S. Department of Labor disclosure files.
 Use Python 3.11 or newer. Install the dependencies listed in
 [pyproject.toml](pyproject.toml):
 
+On macOS, install Python and OpenMP first:
+
 ```sh
-python3 -m venv .venv
+brew install python@3.13 libomp
+python3.13 -m venv .venv
+```
+
+On other systems, check `python3 --version` is at least 3.11, then create the
+environment with `python3 -m venv .venv`.
+
+```sh
 source .venv/bin/activate
 python -m pip install -e '.[data,analysis,ml,dev]'
 ```
 
-On macOS, install OpenMP for XGBoost: `brew install libomp`.
 Run the commands below from the repository root.
 
 ## Look up a company
