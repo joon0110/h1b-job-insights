@@ -321,8 +321,8 @@ def plot_overview(summary: dict, quarters: pd.DataFrame, path: Path) -> None:
     fig.supxlabel(
         "Panel 2 starts at each company's first observed filing. "
         "Panels 3–4 use the same eligible pairs; rates describe history, not model predictions.\n"
-        "Latest case versions are used. The latest source quarter is omitted; "
-        "remaining receipt counts may still be incomplete.",
+        "Latest case versions are used, including the latest source quarter. "
+        "Later releases may revise receipt counts.",
         fontsize=9,
     )
     fig.savefig(path, dpi=160)
@@ -354,8 +354,6 @@ def run(processed_dir: Path, output_dir: Path) -> dict:
         "publication_dates_verified": False,
         "basis": "Latest selected case versions; release quarters are not publication dates.",
         "latest_source_release": panel["latest_source_release"],
-        "excluded_latest_quarters": panel["excluded_latest_quarters"],
-        "maturity_note": panel["maturity_note"],
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     quarters.to_csv(output_dir / "quarters.csv", float_format="%.2f")

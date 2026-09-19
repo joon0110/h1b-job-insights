@@ -62,14 +62,14 @@ def evaluate(data_dir: Path, model_dir: Path, output_dir: Path, jobs: int = 4):
     if output_dir.resolve() in (data_dir.resolve(), model_dir.resolve()):
         raise ValueError("Use a separate directory for check results")
     bundle = load_bundle(data_dir, model_dir)
-    if bundle["trained_through"] != quarter_number("FY2026_Q2"):
-        raise ValueError("This comparison expects data through FY2026 Q2")
     frame = pd.read_parquet(data_dir / "examples.parquet")
-    origin = quarter_number("FY2025_Q4")
+    origin = quarter_number(bundle["selection"]["evaluation_origin"])
+    if quarter_number(bundle["selection"]["selection_origin"]) + 2 > origin:
+        raise ValueError("Model selection overlaps evaluation outcomes")
     training, evaluation = train.split_at(frame, origin)
     rows = frame.loc[evaluation]
     if set(rows.target_quarter) != {origin + 1, origin + 2}:
-        raise ValueError("Both FY2026 Q1 and Q2 outcomes are required")
+        raise ValueError("Both evaluation outcome quarters are required")
     if not np.isfinite(frame[FEATURES].to_numpy()).all():
         raise ValueError("Nonfinite model inputs")
     predictions = rows[
@@ -118,12 +118,12 @@ def evaluate(data_dir: Path, model_dir: Path, output_dir: Path, jobs: int = 4):
     (output_dir / "manifest.json").write_text(
         json.dumps(
             {
-                "history_cutoff": "FY2025_Q4",
-                "outcomes": ["FY2026_Q1", "FY2026_Q2"],
+                "history_cutoff": quarter_label(origin),
+                "outcomes": [quarter_label(origin + 1), quarter_label(origin + 2)],
                 "model_sha256": sha256(model_dir / "classifiers.joblib"),
                 "examples_sha256": sha256(data_dir / "examples.parquet"),
                 "check_code_sha256": sha256(Path(__file__)),
-                "basis": "revised disclosures; previously inspected evaluation period",
+                "basis": "revised disclosure files",
             },
             indent=2,
         )
@@ -133,11 +133,9 @@ def evaluate(data_dir: Path, model_dir: Path, output_dir: Path, jobs: int = 4):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare FY2026 predictions with observed records")
+    parser = argparse.ArgumentParser(description="Compare predictions with the last two quarters")
     parser.add_argument("--data-dir", type=Path, default=Path("data/processed/activity"))
-    parser.add_argument(
-        "--model-dir", type=Path, default=Path("artifacts/activity/trend_constraints")
-    )
+    parser.add_argument("--model-dir", type=Path, default=Path("artifacts/activity"))
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/checks/models"))
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()

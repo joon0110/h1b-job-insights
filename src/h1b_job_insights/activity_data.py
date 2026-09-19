@@ -24,8 +24,7 @@ def prepare_panel(processed_dir: Path, output_dir: Path) -> dict:
     if not files:
         raise ValueError("No main files in source manifest")
     first = quarter_number(files[0]["release"])
-    last_release = quarter_number(files[-1]["release"])
-    last = last_release - 1
+    last = quarter_number(files[-1]["release"])
     if last - first < 4:
         raise ValueError("Need at least five retained quarters for next-quarter activity analysis")
     version = {
@@ -94,12 +93,7 @@ def prepare_panel(processed_dir: Path, output_dir: Path) -> dict:
         "first_quarter": company_activity.quarter_label(first),
         "last_quarter": latest,
         "latest_source_release": files[-1]["release"],
-        "excluded_latest_quarters": 1,
         "excluded_h1b_cases_outside_window": excluded,
-        "maturity_note": (
-            "One trailing quarter omitted to reduce incomplete receipt counts; "
-            "completeness is not guaranteed."
-        ),
         "source_rows": rows,
         "companies": companies,
         "panel_rows": output_rows,

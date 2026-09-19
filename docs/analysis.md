@@ -4,23 +4,23 @@ Run `python -m h1b_job_insights.eda` after preparing the Parquet files.
 Results go to `artifacts/eda/`.
 
 The analysis uses receipt dates (`RECEIVED_DATE`) from FY2022 Q1 through
-FY2026 Q2. Each case is kept at its latest version across the 17 selected
-releases. FY2026 Q3, the latest source quarter, is omitted to reduce incomplete
-recent counts. Earlier quarters can still be incomplete.
+FY2026 Q3. Each case is kept at its latest version across the 17 selected
+releases, including the latest source quarter. Later releases may revise these
+counts. The figures below describe this run; rerun EDA after adding a release.
 
 ## Findings
 
 | Measure | Result |
 | --- | ---: |
-| Employer names | 129,222 |
-| Fiscal quarters | 18 |
-| H-1B LCA cases | 2,373,385 |
-| Requested positions | 4,136,060 |
-| Companies with at least four observed quarters | 122,220 |
-| Companies active in exactly one of their first four quarters | 68.87% |
-| Eligible next-quarter pairs | 1,008,309 |
-| Pairs with no next-quarter record | 793,820 (78.73%) |
-| Pairs with at least one next-quarter record | 214,489 (21.27%) |
+| Employer names | 140,609 |
+| Fiscal quarters | 19 |
+| H-1B LCA cases | 2,582,867 |
+| Requested positions | 4,480,947 |
+| Companies with at least four observed quarters | 124,796 |
+| Companies active in exactly one of their first four quarters | 69.03% |
+| Eligible next-quarter pairs | 1,130,529 |
+| Pairs with no next-quarter record | 888,938 (78.63%) |
+| Pairs with at least one next-quarter record | 241,591 (21.37%) |
 
 A company enters the panel at its first filing within the analysis window.
 Quarters with no record after that point receive zero cases. The panel does not
@@ -32,8 +32,8 @@ Company names are normalized; FEIN does not affect grouping.
 1. **Companies filing each quarter.** Each company counts once in a quarter,
    whether it filed one LCA or hundreds. FY2022 Q1 has 17,226 companies.
    Requested positions are in the CSV and summary.
-2. **Activity in the first four observed quarters.** Of 122,220 companies with
-   four quarters available, 84,173 filed in just one of those quarters. The four
+2. **Activity in the first four observed quarters.** Of 124,796 companies with
+   four quarters available, 86,146 filed in just one of those quarters. The four
    quarters start at each company's first observed filing, so their dates differ
    across companies. The first quarter always has a filing; there is no zero bar.
 3. **Filing after an active or inactive quarter.** The two lines separate companies
@@ -46,7 +46,7 @@ Company names are normalized; FEIN does not affect grouping.
    history and Q2 outcome form another. The same company can contribute several
    pairs. These are historical outcomes, not predicted probabilities.
 
-Charts 3 and 4 use the same 1,008,309 pairs from 108,702 companies. Each pair
+Charts 3 and 4 use the same 1,130,529 pairs from 122,220 companies. Each pair
 requires at least four quarters of prior history and an observed adjacent next
 quarter. The final quarter cannot supply a pair with an unknown future outcome.
 The first possible outcome is FY2023 Q1, after four quarters of FY2022 history.

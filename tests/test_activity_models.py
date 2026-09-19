@@ -15,13 +15,13 @@ from tests.check_constraints import check_monotonicity
 from tests.check_models import evaluate
 
 
-def panel():
+def panel(quarters=18):
     random = np.random.default_rng(42)
     records = []
     first = quarter_number("FY2022_Q1")
     for company in range(30):
         name = f"COMPANY {company}"
-        for t in range(18):
+        for t in range(quarters):
             cases = 1 if t == 0 else int(random.random() < (0.15 + company / 50)) * (company + 1)
             records.append((normalize.employer_id(name), name, quarter_label(first + t), cases))
     return pd.DataFrame(
@@ -97,10 +97,13 @@ def test_xgboost_respects_trend_and_inactivity_directions():
     assert np.ptp(model.predict_proba(frame)[:, 1]) > 0.2
 
 
-def test_training_query_and_random_forest_reuse(tmp_path, monkeypatch):
+@pytest.mark.parametrize("quarters", [18, 19, 20, 21])
+def test_training_query_and_time_splits(tmp_path, monkeypatch, quarters):
     data_dir = tmp_path / "data" / "activity"
     data_dir.mkdir(parents=True)
-    frame = panel()
+    frame = panel(quarters)
+    final_end = quarter_number("FY2022_Q1") + quarters - 1
+    last_quarter = quarter_label(final_end)
     frame.to_parquet(data_dir / "company_quarters.parquet", index=False)
     examples = features.build_examples(frame)
     examples.to_parquet(data_dir / "examples.parquet", index=False)
@@ -109,12 +112,12 @@ def test_training_query_and_random_forest_reuse(tmp_path, monkeypatch):
         "feature_code_sha256": sha256(Path(features.__file__)),
         "examples_sha256": sha256(data_dir / "examples.parquet"),
         "panel_sha256": sha256(data_dir / "company_quarters.parquet"),
-        "last_quarter": "FY2026_Q2",
-        "version": {"sources": [["FY2026_Q3", "source-hash"]]},
+        "last_quarter": last_quarter,
+        "version": {"sources": [[last_quarter, "source-hash"]]},
     }
     (data_dir / "manifest.json").write_text(json.dumps(manifest))
     (data_dir.parent / "source_manifest.json").write_text(
-        json.dumps({"files": [{"kind": "main", "release": "FY2026_Q3", "sha256": "source-hash"}]})
+        json.dumps({"files": [{"kind": "main", "release": last_quarter, "sha256": "source-hash"}]})
     )
     monkeypatch.setattr(
         train,
@@ -126,13 +129,14 @@ def test_training_query_and_random_forest_reuse(tmp_path, monkeypatch):
     )
     model_dir = tmp_path / "models"
     selection = train.run(data_dir, model_dir, jobs=1)
+    assert selection["trend_constraints"] == train.TREND_CONSTRAINTS
     assert sorted(path.name for path in model_dir.iterdir()) == ["classifiers.joblib"]
     history, result = activity_predict.predict("company 0", data_dir, model_dir)
-    assert len(history) == 18
-    assert result.target_quarter.tolist() == ["FY2026_Q3"]
+    assert len(history) == quarters
+    assert result.target_quarter.tolist() == [quarter_label(final_end + 1)]
     assert result.probability.between(0, 1).all()
     bundle = joblib.load(model_dir / "classifiers.joblib")
-    assert bundle["trained_through"] == quarter_number("FY2026_Q2")
+    assert bundle["trained_through"] == final_end
     assert bundle["training_rows"] == examples.target_active.notna().sum()
     live = examples.loc[
         examples.EMPLOYER_NAME.eq("COMPANY 0")
@@ -157,7 +161,9 @@ def test_training_query_and_random_forest_reuse(tmp_path, monkeypatch):
     with monkeypatch.context() as patch:
         patch.setattr(train, "fit_at", historical_fit)
         predictions, metrics = evaluate(data_dir, model_dir, tmp_path / "checks", jobs=1)
-    cutoff = quarter_number("FY2025_Q4")
+    cutoff = final_end - 2
+    assert quarter_number(selection["selection_origin"]) + 2 == cutoff
+    assert quarter_number(selection["calibration_origin"]) + 2 <= cutoff - 2
     assert cutoffs == [cutoff, cutoff]
     assert predictions.origin.eq(cutoff).all()
     assert set(predictions.target_quarter) == {cutoff + 1, cutoff + 2}
@@ -166,31 +172,6 @@ def test_training_query_and_random_forest_reuse(tmp_path, monkeypatch):
     assert sha256(model_dir / "classifiers.joblib") == model_hash
     with pytest.raises(ValueError, match="separate directory"):
         evaluate(data_dir, model_dir, model_dir, jobs=1)
-    make_model = train.make_model
-
-    def only_xgboost(name, *args, **kwargs):
-        assert name == "xgboost", "Random Forest should be reused"
-        return make_model(name, *args, **kwargs)
-
-    monkeypatch.setattr(train, "make_model", only_xgboost)
-    constrained_dir = tmp_path / "constrained"
-    constrained = train.run(
-        data_dir, constrained_dir, jobs=1, constrain_trends=True, reuse_random_forest=model_dir
-    )
-    assert constrained["trend_constraints"] == train.TREND_CONSTRAINTS
-    assert sorted(path.name for path in constrained_dir.iterdir()) == ["classifiers.joblib"]
-    reused = joblib.load(constrained_dir / "classifiers.joblib")
-    np.testing.assert_array_equal(
-        bundle["models"]["random_forest"].predict_proba(examples[features.FEATURES]),
-        reused["models"]["random_forest"].predict_proba(examples[features.FEATURES]),
-    )
-    _, constrained_query = activity_predict.predict("company 0", data_dir, constrained_dir)
-    expected = reused["models"]["xgboost"].predict_proba(live[features.FEATURES])[:, 1]
-    if constrained["use_calibration"]["xgboost"]:
-        expected = train.calibrate(reused["calibrators"]["xgboost"], expected)
-    np.testing.assert_allclose(constrained_query.probability, expected)
-    with pytest.raises(ValueError, match="separate output"):
-        train.run(data_dir, model_dir, reuse_random_forest=model_dir)
     with pytest.raises(ValueError, match="No H-1B"):
         activity_predict.predict("missing", data_dir, model_dir)
     (data_dir / "examples.parquet").write_bytes(b"changed")

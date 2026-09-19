@@ -47,9 +47,7 @@ def check_monotonicity(model, rows: pd.DataFrame, calibrator=None) -> pd.DataFra
 def main():
     parser = argparse.ArgumentParser(description="Check saved XGBoost trend constraints")
     parser.add_argument("--data-dir", type=Path, default=Path("data/processed/activity"))
-    parser.add_argument(
-        "--model-dir", type=Path, default=Path("artifacts/activity/trend_constraints")
-    )
+    parser.add_argument("--model-dir", type=Path, default=Path("artifacts/activity"))
     args = parser.parse_args()
     bundle = load_bundle(args.data_dir, args.model_dir)
     if bundle["selection"].get("trend_constraints") != TREND_CONSTRAINTS:

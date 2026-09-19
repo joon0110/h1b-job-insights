@@ -10,11 +10,6 @@ from h1b_job_insights.activity_data import sha256
 from h1b_job_insights.activity_train import calibrate
 from h1b_job_insights.company_activity import quarter_label
 
-MODEL_DIRS = {
-    "xgboost": Path("artifacts/activity/trend_constraints"),
-    "random_forest": Path("artifacts/activity"),
-}
-
 
 def load_bundle(data_dir: Path, model_dir: Path) -> dict:
     bundle = joblib.load(model_dir / "classifiers.joblib")
@@ -75,13 +70,12 @@ def main() -> None:
     )
     parser.add_argument("--company", required=True)
     parser.add_argument("--data-dir", type=Path, default=Path("data/processed/activity"))
-    parser.add_argument("--model", choices=MODEL_DIRS, default="xgboost")
+    parser.add_argument("--model", choices=("xgboost", "random_forest"), default="xgboost")
     parser.add_argument(
-        "--model-dir", type=Path, help="Override the selected model's artifact directory"
+        "--model-dir", type=Path, default=Path("artifacts/activity"), help="Model directory"
     )
     args = parser.parse_args()
-    model_dir = args.model_dir if args.model_dir is not None else MODEL_DIRS[args.model]
-    history, result = predict(args.company, args.data_dir, model_dir, args.model)
+    history, result = predict(args.company, args.data_dir, args.model_dir, args.model)
     row = result.iloc[0]
     print(row.EMPLOYER_NAME)
     print("History by receipt date")

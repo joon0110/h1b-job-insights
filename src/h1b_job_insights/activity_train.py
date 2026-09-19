@@ -1,5 +1,6 @@
 import argparse
 import json
+import tempfile
 from pathlib import Path
 
 import joblib
@@ -87,12 +88,19 @@ def fit_at(frame, name, parameters, origin, jobs):
     return model, frame.loc[evaluation]
 
 
+def time_splits(final_end: int) -> dict:
+    return {
+        "tuning_origins": [quarter_label(final_end - offset) for offset in (10, 8)],
+        "calibration_origin": quarter_label(final_end - 6),
+        "selection_origin": quarter_label(final_end - 4),
+        "evaluation_origin": quarter_label(final_end - 2),
+    }
+
+
 def run(
     data_dir: Path,
     output_dir: Path,
     jobs: int = 4,
-    constrain_trends: bool = False,
-    reuse_random_forest: Path | None = None,
 ) -> dict:
     manifest = json.loads((data_dir / "manifest.json").read_text())
     if (
@@ -102,9 +110,20 @@ def run(
         or manifest["panel_sha256"] != sha256(data_dir / "company_quarters.parquet")
     ):
         raise ValueError("Activity inputs changed; rebuild the examples")
-    if manifest["last_quarter"] != "FY2026_Q2":
-        raise ValueError("This training setup expects history ending at FY2026 Q2")
+    final_end = quarter_number(manifest["last_quarter"])
+    splits = time_splits(final_end)
     frame = pd.read_parquet(data_dir / "examples.parquet")
+    for label in [
+        *splits["tuning_origins"],
+        splits["calibration_origin"],
+        splits["selection_origin"],
+    ]:
+        origin = quarter_number(label)
+        training, evaluation = split_at(frame, origin)
+        if frame.loc[training, "target_active"].nunique() != 2:
+            raise ValueError(f"Need both filing and nonfiling training examples through {label}")
+        if set(frame.loc[evaluation, "target_quarter"]) != {origin + 1, origin + 2}:
+            raise ValueError(f"Need two observed outcome quarters after {label}")
     if not np.isfinite(frame[FEATURES].to_numpy()).all():
         raise ValueError("Nonfinite features")
     if not frame.target_active.dropna().isin([0, 1]).all():
@@ -114,33 +133,14 @@ def run(
     candidates_by_model = {
         name: [dict(settings) for settings in candidates] for name, candidates in CANDIDATES.items()
     }
-    if constrain_trends:
-        for settings in candidates_by_model["xgboost"]:
-            settings["monotone_constraints"] = TREND_CONSTRAINTS.copy()
-    reused = None
-    if reuse_random_forest is not None:
-        if output_dir.resolve() == reuse_random_forest.resolve():
-            raise ValueError("Use a separate output directory when reusing Random Forest")
-        reused = joblib.load(reuse_random_forest / "classifiers.joblib")
-        if (
-            reused["selection"]["input_manifest"] != manifest
-            or reused["features"] != FEATURES
-            or reused["trained_through"] != quarter_number("FY2026_Q2")
-            or reused["selection"]["selection_origin"] != "FY2025_Q2"
-            or reused["selection"]["calibration_origin"] != "FY2024_Q4"
-        ):
-            raise ValueError("Saved Random Forest uses different data or time splits")
+    for settings in candidates_by_model["xgboost"]:
+        settings["monotone_constraints"] = TREND_CONSTRAINTS.copy()
     output_dir.mkdir(parents=True, exist_ok=True)
     tuning = []
     parameters = {}
     for name, candidates in candidates_by_model.items():
-        if reused is not None and name == "random_forest":
-            parameters[name] = reused["selection"]["parameters"][name]
-            candidates_by_model[name] = reused["selection"]["candidates"][name]
-            print("Reuse Random Forest settings and fitted model", flush=True)
-            continue
         for candidate, settings in enumerate(candidates):
-            for label in ("FY2023_Q4", "FY2024_Q2"):
+            for label in splits["tuning_origins"]:
                 origin = quarter_number(label)
                 training, evaluation = split_at(frame, origin)
                 print(f"Tune {name} {candidate + 1}/{len(candidates)}, origin {label}", flush=True)
@@ -187,16 +187,12 @@ def run(
             parameters[name]["n_estimators"] = int(np.median(iterations))
         print(f"Selected {name}: {parameters[name]}", flush=True)
 
-    selection_origin = quarter_number("FY2025_Q2")
+    selection_origin = quarter_number(splits["selection_origin"])
     calibrators = {}
     use_calibration = {}
     for name in CANDIDATES:
-        if reused is not None and name == "random_forest":
-            calibrators[name] = reused["calibrators"][name]
-            use_calibration[name] = reused["selection"]["use_calibration"][name]
-            continue
         model, calibration_rows = fit_at(
-            frame, name, parameters[name], quarter_number("FY2024_Q4"), jobs
+            frame, name, parameters[name], quarter_number(splits["calibration_origin"]), jobs
         )
         p = model.predict_proba(calibration_rows[FEATURES])[:, 1]
         calibrators[name] = LogisticRegression(C=1.0, solver="lbfgs").fit(
@@ -211,9 +207,7 @@ def run(
         adjusted_loss = log_loss(
             selection_rows.target_active, np.clip(adjusted, 1e-7, 1 - 1e-7), labels=[0, 1]
         )
-        calibration_allowed = (
-            not (constrain_trends and name == "xgboost") or calibrators[name].coef_[0, 0] > 0
-        )
+        calibration_allowed = name != "xgboost" or calibrators[name].coef_[0, 0] > 0
         use_calibration[name] = bool(calibration_allowed and adjusted_loss < raw_loss)
         del model
     selection = {
@@ -221,37 +215,34 @@ def run(
         "parameters": parameters,
         "use_calibration": use_calibration,
         "candidates": candidates_by_model,
-        "trend_constraints": TREND_CONSTRAINTS if constrain_trends else {},
-        "tuning_origins": ["FY2023_Q4", "FY2024_Q2"],
-        "calibration_origin": "FY2024_Q4",
-        "selection_origin": "FY2025_Q2",
+        "trend_constraints": TREND_CONSTRAINTS,
+        **splits,
         "input_manifest": manifest,
     }
-    final_end = quarter_number(manifest["last_quarter"])
     training = frame.target_active.notna() & frame.target_quarter.le(final_end)
     final_models = {}
     for name in CANDIDATES:
-        if reused is not None and name == "random_forest":
-            final_models[name] = reused["models"][name]
-            continue
-        print(f"Final fit {name} through FY2026 Q2: {training.sum():,} rows", flush=True)
+        print(
+            f"Final fit {name} through {quarter_label(final_end)}: {training.sum():,} rows",
+            flush=True,
+        )
         model = make_model(name, parameters[name], jobs)
         model.fit(frame.loc[training, FEATURES], frame.loc[training, "target_active"].astype(int))
         final_models[name] = model
-    joblib.dump(
-        {
-            "models": final_models,
-            "calibrators": calibrators,
-            "selection": selection,
-            "features": FEATURES,
-            "training_rows": int(training.sum()),
-            "trained_through": final_end,
-            "panel_sha256": manifest["panel_sha256"],
-            "feature_code_sha256": manifest["feature_code_sha256"],
-        },
-        output_dir / "classifiers.joblib",
-        compress=3,
-    )
+    bundle = {
+        "models": final_models,
+        "calibrators": calibrators,
+        "selection": selection,
+        "features": FEATURES,
+        "training_rows": int(training.sum()),
+        "trained_through": final_end,
+        "panel_sha256": manifest["panel_sha256"],
+        "feature_code_sha256": manifest["feature_code_sha256"],
+    }
+    with tempfile.TemporaryDirectory(dir=output_dir) as temp:
+        path = Path(temp) / "classifiers.joblib"
+        joblib.dump(bundle, path, compress=3)
+        path.replace(output_dir / "classifiers.joblib")
     print(f"Saved models: {output_dir / 'classifiers.joblib'}", flush=True)
     return selection
 
@@ -261,10 +252,8 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=Path("data/processed/activity"))
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/activity"))
     parser.add_argument("--jobs", type=int, default=4)
-    parser.add_argument("--constrain-trends", action="store_true")
-    parser.add_argument("--reuse-random-forest", type=Path)
     args = parser.parse_args()
-    run(args.data_dir, args.output_dir, args.jobs, args.constrain_trends, args.reuse_random_forest)
+    run(args.data_dir, args.output_dir, args.jobs)
 
 
 if __name__ == "__main__":
